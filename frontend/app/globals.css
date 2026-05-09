@@ -1,0 +1,111 @@
+@import "@fontsource/plus-jakarta-sans/400.css";
+@import "@fontsource/plus-jakarta-sans/500.css";
+@import "@fontsource/plus-jakarta-sans/600.css";
+@import "@fontsource/plus-jakarta-sans/700.css";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design Tokens ───────────────────────────────────────────── */
+/* Declared outside @layer so they override shadcn's @layer base  */
+
+:root {
+  /* Base — white/black */
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+
+  /* Structural grays */
+  --border: #e5e5e5;
+  --border-subtle: #f0f0f0;
+  --surface: #fafafa;
+  --surface-raised: #ffffff;
+  --muted: #f5f5f5;
+  --muted-foreground: #737373;
+
+  /* Interactive */
+  --ring: #0a0a0a;
+
+  /* Semantic — single-hue, readable on white */
+  --positive: #166534;
+  --positive-subtle: #f0fdf4;
+  --negative: #991b1b;
+  --negative-subtle: #fef2f2;
+  --warning: #92400e;
+  --warning-subtle: #fffbeb;
+
+  /* Shape */
+  --radius: 6px;
+
+  /* shadcn compat aliases */
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --input: #e5e5e5;
+  --destructive: #991b1b;
+  --accent: #f5f5f5;
+  --accent-foreground: #0a0a0a;
+}
+
+/* ─── Base Reset ──────────────────────────────────────────────── */
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  ::selection {
+    background: var(--foreground);
+    color: var(--background);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Minimal scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+}
+
+/* ─── Utilities ───────────────────────────────────────────────── */
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+
+  .chip-positive { color: var(--positive); background: var(--positive-subtle); }
+  .chip-negative { color: var(--negative); background: var(--negative-subtle); }
+  .chip-neutral  { color: var(--muted-foreground); background: var(--muted); }
+  .chip-warning  { color: var(--warning); background: var(--warning-subtle); }
+}
