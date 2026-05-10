@@ -56,17 +56,22 @@ async def run_youtube_for_tracker(tracker_id: uuid.UUID):
                     })
                     if comments_resp.status_code != 200:
                         continue
+                    from backend.tasks.task_utils import strip_html, mention_matches_keywords
                     for thread in comments_resp.json().get("items", []):
                         top = thread.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
                         like_count = top.get("likeCount", 0)
+                        text = strip_html(top.get("textDisplay", ""))
+                        if not text or not mention_matches_keywords(text, tracker.keywords):
+                            continue
                         items_to_ingest.append({
                             "source_channel": "youtube",
                             "source_url": f"https://www.youtube.com/watch?v={video_id}&lc={thread.get('id', '')}",
                             "source_domain": "youtube.com",
                             "author_name": top.get("authorDisplayName"),
                             "author_id": top.get("authorChannelId", {}).get("value"),
-                            "content_text": top.get("textDisplay", ""),
+                            "content_text": text,
                             "engagement_raw": {"likes": like_count},
+                            "keywords_matched": [kw for kw in tracker.keywords if kw.lower() in text.lower()],
                             "raw_payload": thread,
                         })
         except Exception as exc:

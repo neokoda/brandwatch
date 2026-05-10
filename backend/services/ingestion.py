@@ -66,6 +66,13 @@ async def run_ingestion_pipeline(db: AsyncSession, body: IngestRequest) -> dict:
             shares=item.engagement_raw.get("shares", 0),
             comments=item.engagement_raw.get("comments", 0),
         )
+        if engagement > 1.0:
+            triage_priority = "high"
+        elif engagement > 0:
+            triage_priority = "medium"
+        else:
+            triage_priority = "low"
+
         mention = Mention(
             id=uuid.uuid4(),
             tracker_id=body.tracker_id,
@@ -86,6 +93,7 @@ async def run_ingestion_pipeline(db: AsyncSession, body: IngestRequest) -> dict:
             engagement_raw=item.engagement_raw,
             keywords_matched=item.keywords_matched,
             raw_payload=item.raw_payload,
+            triage_priority=triage_priority,
         )
         db.add(mention)
         new_mentions.append(mention)

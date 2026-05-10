@@ -24,6 +24,7 @@ const ALERT_TYPE_LABELS: Record<string, string> = {
   negativity_surge: "Negativity Surge",
   volume_spike: "Volume Spike",
   crisis_risk: "Crisis Risk",
+  high_engagement: "High Engagement",
   velocity_spike: "Velocity Spike",
   cross_channel: "Cross-Channel",
 };

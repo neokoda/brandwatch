@@ -53,9 +53,10 @@ async def run_playstore_for_tracker(tracker_id: uuid.UUID):
                 await asyncio.sleep(1)
                 raw_reviews = await loop.run_in_executor(None, _fetch_reviews_sync, app_id)
 
+                from backend.tasks.task_utils import mention_matches_keywords
                 for review in raw_reviews:
                     text = (review.get("content") or "").strip()
-                    if not text:
+                    if not text or not mention_matches_keywords(text, tracker.keywords):
                         continue
 
                     at = review.get("at")

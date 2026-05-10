@@ -231,9 +231,11 @@ export default function MentionsPage() {
             {/* Pagination */}
             <div className="flex items-center justify-between mt-4 text-sm text-muted-foreground">
               <span>Showing {((page - 1) * 25) + 1}–{Math.min(page * 25, total)} of {total.toLocaleString()}</span>
-              <div className="flex gap-2">
+              <div className="flex gap-1">
+                <Button size="sm" variant="default" disabled={page === 1} onClick={() => load(1)} title="First page">«</Button>
                 <Button size="sm" variant="default" disabled={page === 1} onClick={() => load(page - 1)}>Previous</Button>
                 <Button size="sm" variant="default" disabled={page * 25 >= total} onClick={() => load(page + 1)}>Next</Button>
+                <Button size="sm" variant="default" disabled={page * 25 >= total} onClick={() => load(Math.ceil(total / 25))} title="Last page">»</Button>
               </div>
             </div>
           </>

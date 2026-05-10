@@ -4,7 +4,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.models.snapshot import SentimentSnapshot
+from backend.models.mention import Mention
+from backend.models.tracker import Tracker
 from backend.config import settings
+
+HIGH_ENGAGEMENT_THRESHOLD = 1.5  # log(1 + likes + 2*shares + 0.5*comments) ≈ 3.5 weighted units (demo)
 
 
 async def check_anomalies(db: AsyncSession, tracker_id: uuid.UUID, account_id: uuid.UUID) -> list[dict]:
@@ -83,7 +87,6 @@ async def check_anomalies(db: AsyncSession, tracker_id: uuid.UUID, account_id: u
     baseline_vol = statistics.mean([s.mention_count for s in historical]) if historical else 0
     velocity_ratio = current.mention_count / baseline_vol if baseline_vol > 0 else 0
     if (current_neg_share > settings.DEFAULT_ALERT_CRISIS_NEG_SHARE
-            and current.avg_engagement > 0.7
             and velocity_ratio > 2.0):
         alerts.append({
             "tracker_id": tracker_id,
@@ -91,10 +94,42 @@ async def check_anomalies(db: AsyncSession, tracker_id: uuid.UUID, account_id: u
             "alert_type": "crisis_risk",
             "severity": "critical",
             "title": "Crisis Risk Alert",
-            "description": f"High negative share {current_neg_share:.1%}, {velocity_ratio:.1f}× baseline volume, high engagement",
+            "description": f"High negative share {current_neg_share:.1%}, {velocity_ratio:.1f}× baseline volume",
             "metric_value": current_neg_share,
             "metric_baseline": settings.DEFAULT_ALERT_CRISIS_NEG_SHARE,
             "threshold_used": settings.DEFAULT_ALERT_CRISIS_NEG_SHARE,
+        })
+
+    # --- High-engagement mention ---
+    # Check recent ingested mentions (last 2 hours) for engagement spikes
+    recent_cutoff = now - timedelta(hours=2)
+    high_eng_result = await db.execute(
+        select(Mention)
+        .join(Tracker, Mention.tracker_id == Tracker.id)
+        .where(
+            Mention.tracker_id == tracker_id,
+            Mention.ingested_at >= recent_cutoff,
+            Mention.engagement_score >= HIGH_ENGAGEMENT_THRESHOLD,
+        )
+        .order_by(Mention.engagement_score.desc())
+        .limit(5)
+    )
+    high_eng_mentions = high_eng_result.scalars().all()
+    if high_eng_mentions:
+        top = high_eng_mentions[0]
+        alerts.append({
+            "tracker_id": tracker_id,
+            "account_id": account_id,
+            "alert_type": "high_engagement",
+            "severity": "warning",
+            "title": "High-Engagement Mention Detected",
+            "description": (
+                f"{len(high_eng_mentions)} high-engagement mention(s) in the last 2h "
+                f"(top score: {top.engagement_score:.1f}, source: {top.source_channel})"
+            ),
+            "metric_value": top.engagement_score,
+            "metric_baseline": HIGH_ENGAGEMENT_THRESHOLD,
+            "threshold_used": HIGH_ENGAGEMENT_THRESHOLD,
         })
 
     return alerts

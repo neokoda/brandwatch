@@ -72,6 +72,9 @@ async def run_appstore_for_tracker(tracker_id: uuid.UUID):
                         full_text = f"{title}. {content}".strip(". ") if title else content
                         if not full_text.strip():
                             continue
+                        from backend.tasks.task_utils import mention_matches_keywords
+                        if not mention_matches_keywords(full_text, tracker.keywords):
+                            continue
 
                         updated_raw = entry.get("updated", {}).get("label", "")
                         published_at = None

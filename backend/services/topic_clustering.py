@@ -10,31 +10,41 @@ import httpx
 import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from backend.models.mention import Mention
 from backend.models.topic import TopicCluster
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
+HF_ROUTER = "https://router.huggingface.co/hf-inference/models"
 HF_BASE = "https://api-inference.huggingface.co/models"
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"   # feature-extraction; all-MiniLM-L6-v2 returns 404 on new router
 
 
 async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     """Recluster mentions for a tracker. Returns number of clusters created."""
     result = await db.execute(
         select(Mention.id, Mention.content_text)
-        .where(Mention.tracker_id == tracker_id)
+        .where(Mention.tracker_id == tracker_id, Mention.language_code == "en")
         .order_by(Mention.ingested_at.desc())
         .limit(2000)
     )
     rows = result.all()
-    if len(rows) < 10:
+
+    # Filter out very short or mostly non-ASCII texts
+    clean_rows = [
+        (r[0], r[1]) for r in rows
+        if len(r[1].strip()) >= 30
+        and sum(1 for c in r[1] if ord(c) < 128) / max(len(r[1]), 1) >= 0.85
+    ]
+
+    if len(clean_rows) < 10:
+        logger.info("recluster_tracker %s: only %d clean EN texts, skipping", tracker_id, len(clean_rows))
         return 0
 
-    ids = [r[0] for r in rows]
-    texts = [r[1][:512] for r in rows]
+    ids = [r[0] for r in clean_rows]
+    texts = [r[1][:512] for r in clean_rows]
 
     embeddings = await _get_embeddings(texts)
     if embeddings is None:
@@ -43,6 +53,14 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     clusters = _cluster(embeddings, texts)
     if not clusters:
         return 0
+
+    # Remove old clusters for this tracker before writing new ones
+    await db.execute(
+        update(Mention)
+        .where(Mention.tracker_id == tracker_id)
+        .values(topic_cluster_id=None)
+    )
+    await db.execute(delete(TopicCluster).where(TopicCluster.tracker_id == tracker_id))
 
     now = datetime.now(timezone.utc)
     created = 0
@@ -76,26 +94,49 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
 
 
 async def _get_embeddings(texts: list[str]) -> np.ndarray | None:
-    url = f"{HF_BASE}/{EMBEDDING_MODEL}"
+    """Embed texts in batches of 32 using the HF router endpoint."""
+    import asyncio
+    url = f"{HF_ROUTER}/{EMBEDDING_MODEL}"
     headers = {"Authorization": f"Bearer {settings.HUGGINGFACE_API_TOKEN}"}
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, headers=headers, json={"inputs": texts})
-            resp.raise_for_status()
-            return np.array(resp.json())
-    except Exception as exc:
-        logger.warning("HF embedding API error: %s", exc)
-        return None
+    batch_size = 32
+    all_embeddings = []
+
+    async with httpx.AsyncClient(timeout=90) as client:
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            for attempt in range(2):
+                try:
+                    resp = await client.post(url, headers=headers, json={"inputs": batch})
+                    if resp.status_code == 503:
+                        logger.info("HF model loading, waiting 20s before retry (attempt %d)", attempt + 1)
+                        await asyncio.sleep(20)
+                        continue
+                    resp.raise_for_status()
+                    all_embeddings.extend(resp.json())
+                    break
+                except Exception as exc:
+                    logger.warning("HF embedding batch %d error: %s", i // batch_size, exc)
+                    if attempt == 1:
+                        return None
+
+    return np.array(all_embeddings) if len(all_embeddings) == len(texts) else None
 
 
 def _cluster(embeddings: np.ndarray, texts: list[str]) -> list[tuple]:
     """Returns list of (cluster_texts, indices, keywords)."""
+    n = len(embeddings)
+    # Scale min_cluster_size to data size: at least 3, at most 10
+    min_cluster_size = max(3, min(10, n // 15))
+
     try:
         from umap import UMAP
         import hdbscan
 
-        reduced = UMAP(n_components=5, n_neighbors=15, min_dist=0.0, metric="cosine").fit_transform(embeddings)
-        labels = hdbscan.HDBSCAN(min_cluster_size=5, metric="euclidean").fit_predict(reduced)
+        n_components = min(5, n - 1)
+        n_neighbors = min(15, n - 1)
+        reduced = UMAP(n_components=n_components, n_neighbors=n_neighbors, min_dist=0.0, metric="cosine").fit_transform(embeddings)
+        labels = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, metric="euclidean").fit_predict(reduced)
+        logger.info("HDBSCAN: %d texts → %d clusters (noise: %d)", n, len(set(labels)) - (1 if -1 in labels else 0), sum(1 for l in labels if l == -1))
     except Exception as exc:
         logger.warning("Clustering error: %s", exc)
         return []
@@ -115,6 +156,8 @@ def _cluster(embeddings: np.ndarray, texts: list[str]) -> list[tuple]:
     return result
 
 
+_NOISE_PATTERN = __import__("re").compile(r"^[\d\s\W]+$")  # pure numbers/punctuation
+
 def _ctfidf_keywords(cluster_texts: list[str], all_texts: list[str]) -> list[str]:
     """c-TF-IDF: words overrepresented in the cluster vs the whole corpus."""
     try:
@@ -125,37 +168,71 @@ def _ctfidf_keywords(cluster_texts: list[str], all_texts: list[str]) -> list[str
         all_freq = np.asarray(all_mat).flatten()
         with np.errstate(divide="ignore", invalid="ignore"):
             scores = np.where(all_freq > 0, cluster_freq / all_freq, 0)
-        top_indices = scores.argsort()[::-1][:10]
+        top_indices = scores.argsort()[::-1][:20]
         terms = vec.get_feature_names_out()
-        return [terms[i] for i in top_indices if scores[i] > 0]
+        keywords = []
+        for i in top_indices:
+            if scores[i] <= 0:
+                continue
+            term = terms[i]
+            # Drop pure numbers, single chars, or HTML artifacts
+            if len(term) < 3 or _NOISE_PATTERN.match(term) or "href" in term or "http" in term:
+                continue
+            keywords.append(term)
+            if len(keywords) == 10:
+                break
+        return keywords
     except Exception:
         return []
 
 
 async def _label_cluster(keywords: list[str], examples: list[str]) -> str:
+    """Generate a short topic label from keywords.
+
+    Tries HF LLM first; falls back to a keyword-combination heuristic.
+    HF text-generation models are frequently unavailable on the free tier,
+    so the fallback is designed to produce readable labels on its own.
+    """
     if not keywords:
         return "Unlabeled"
-    if not settings.HUGGINGFACE_API_TOKEN:
-        return keywords[0].title() if keywords else "Topic"
 
-    model = "mistralai/Mistral-7B-Instruct-v0.3"
-    url = f"{HF_BASE}/{model}"
-    headers = {"Authorization": f"Bearer {settings.HUGGINGFACE_API_TOKEN}"}
-    keyword_str = ", ".join(keywords[:8])
-    examples_str = "\n".join(f"- {e[:100]}" for e in examples)
-    prompt = (
-        f"Keywords: {keyword_str}\n"
-        f"Example mentions:\n{examples_str}\n\n"
-        "Give this topic a short label (3-5 words). Respond with only the label."
-    )
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(
-                url, headers=headers,
-                json={"inputs": prompt, "parameters": {"max_new_tokens": 20, "return_full_text": False}},
-            )
-            resp.raise_for_status()
-            text = resp.json()[0]["generated_text"].strip().split("\n")[0]
-            return text[:80] or keywords[0].title()
-    except Exception:
-        return keywords[0].title() if keywords else "Topic"
+    # --- HF LLM attempt ---
+    if settings.HUGGINGFACE_API_TOKEN:
+        model = "mistralai/Mistral-7B-Instruct-v0.3"
+        url = f"{HF_ROUTER}/{model}"
+        headers = {"Authorization": f"Bearer {settings.HUGGINGFACE_API_TOKEN}"}
+        keyword_str = ", ".join(keywords[:8])
+        examples_str = "\n".join(f"- {e[:100]}" for e in examples)
+        prompt = (
+            f"Keywords: {keyword_str}\n"
+            f"Example mentions:\n{examples_str}\n\n"
+            "Give this topic a short label (3-5 words). Respond with only the label."
+        )
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post(
+                    url, headers=headers,
+                    json={"inputs": prompt, "parameters": {"max_new_tokens": 20, "return_full_text": False}},
+                )
+                if resp.status_code == 200:
+                    text = resp.json()[0]["generated_text"].strip().split("\n")[0]
+                    if text:
+                        return text[:80]
+        except Exception:
+            pass
+
+    # --- Keyword heuristic fallback ---
+    # Prefer bigrams (more descriptive) over single words
+    bigrams = [k for k in keywords if " " in k]
+    unigrams = [k for k in keywords if " " not in k and len(k) > 3]
+    # Build label from best bigram + best unigram, or two bigrams, or two unigrams
+    parts: list[str] = []
+    if bigrams:
+        parts.append(bigrams[0])
+    if len(bigrams) >= 2:
+        parts.append(bigrams[1])
+    elif unigrams:
+        parts.append(unigrams[0])
+    if not parts:
+        parts = keywords[:2]
+    return " & ".join(p.title() for p in parts[:2])
