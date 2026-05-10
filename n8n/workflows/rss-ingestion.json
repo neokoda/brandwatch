@@ -1,0 +1,59 @@
+{
+  "name": "RSS Ingestion (every 30min)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 30 }]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.RSS_FEED_URL}}"
+      },
+      "name": "Fetch RSS Feed",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.API_BASE_URL}}/api/ingest/mentions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer ={{$vars.API_TOKEN}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ tracker_id: $vars.TRACKER_ID, mentions: $input.all().map(item => ({ source_channel: 'rss', source_url: item.json.link || item.json.guid, source_domain: (item.json.link || '').replace(/https?:\\/\\/([^/]+).*/, '$1'), author_name: item.json.author || item.json.creator, content_text: ((item.json.title || '') + '. ' + (item.json.summary || item.json.content || '')).slice(0, 2000), published_at: item.json.pubDate || item.json.date, keywords_matched: $vars.TRACKER_KEYWORDS.split(','), raw_payload: { feed: $vars.RSS_FEED_URL } })) }) }}"
+      },
+      "name": "POST to Ingest API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Fetch RSS Feed", "type": "main", "index": 0 }]]
+    },
+    "Fetch RSS Feed": {
+      "main": [[{ "node": "POST to Ingest API", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "meta": {
+    "notes": "One workflow instance per RSS feed URL per tracker. Set: RSS_FEED_URL, API_BASE_URL, API_TOKEN, TRACKER_ID, TRACKER_KEYWORDS. Duplicate this workflow for each feed URL."
+  }
+}

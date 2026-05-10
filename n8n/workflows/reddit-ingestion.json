@@ -1,0 +1,75 @@
+{
+  "name": "Reddit Ingestion (every 30min)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 30 }]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://oauth.reddit.com/search.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{$vars.TRACKER_KEYWORDS}}" },
+            { "name": "limit", "value": "25" },
+            { "name": "t", "value": "day" },
+            { "name": "sort", "value": "new" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer ={{$vars.REDDIT_ACCESS_TOKEN}}" },
+            { "name": "User-Agent", "value": "brandwatch-ingestion/1.0" }
+          ]
+        }
+      },
+      "name": "Search Reddit Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.API_BASE_URL}}/api/ingest/mentions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer ={{$vars.API_TOKEN}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ tracker_id: $vars.TRACKER_ID, mentions: ($json.data?.children || []).map(c => ({ source_channel: 'reddit', source_url: 'https://reddit.com' + c.data.permalink, source_domain: 'reddit.com', author_name: c.data.author, content_text: (c.data.title + ' ' + (c.data.selftext || '')).slice(0, 2000), engagement_raw: { likes: c.data.score, comments: c.data.num_comments }, keywords_matched: $vars.TRACKER_KEYWORDS.split(','), raw_payload: { subreddit: c.data.subreddit, score: c.data.score } })) }) }}"
+      },
+      "name": "POST to Ingest API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Search Reddit Posts", "type": "main", "index": 0 }]]
+    },
+    "Search Reddit Posts": {
+      "main": [[{ "node": "POST to Ingest API", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "meta": {
+    "notes": "Requires REDDIT_ACCESS_TOKEN. Reddit OAuth access tokens expire every 1hr — add a token-refresh step or use a long-lived service account token. Set: API_BASE_URL, API_TOKEN, TRACKER_ID, TRACKER_KEYWORDS."
+  }
+}

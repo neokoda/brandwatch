@@ -1,0 +1,70 @@
+{
+  "name": "YouTube Ingestion (every 30min)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 30 }]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "key", "value": "={{$vars.YOUTUBE_API_KEY}}" },
+            { "name": "q", "value": "={{$vars.TRACKER_KEYWORDS}}" },
+            { "name": "part", "value": "snippet" },
+            { "name": "type", "value": "video" },
+            { "name": "maxResults", "value": "10" },
+            { "name": "order", "value": "date" }
+          ]
+        }
+      },
+      "name": "Search YouTube Videos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.API_BASE_URL}}/api/ingest/mentions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer ={{$vars.API_TOKEN}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ tracker_id: $vars.TRACKER_ID, mentions: $json.items.filter(v => v.id?.videoId).map(v => ({ source_channel: 'youtube', source_url: 'https://www.youtube.com/watch?v=' + v.id.videoId, source_domain: 'youtube.com', author_name: v.snippet?.channelTitle, content_text: (v.snippet?.title || '') + ' ' + (v.snippet?.description || ''), published_at: v.snippet?.publishedAt, keywords_matched: $vars.TRACKER_KEYWORDS.split(','), raw_payload: v })) }) }}"
+      },
+      "name": "POST to Ingest API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Search YouTube Videos", "type": "main", "index": 0 }]]
+    },
+    "Search YouTube Videos": {
+      "main": [[{ "node": "POST to Ingest API", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "meta": {
+    "notes": "Set in n8n env vars: YOUTUBE_API_KEY, API_BASE_URL, API_TOKEN, TRACKER_ID, TRACKER_KEYWORDS. Comment fetching requires a second HTTP Request node per video — simplify by ingesting video-level data only via n8n; APScheduler handles comment threading."
+  }
+}

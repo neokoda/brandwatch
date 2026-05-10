@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/components/providers/auth-provider";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -12,6 +13,7 @@ import {
   Lightbulb,
   ClipboardCheck,
   Settings,
+  LogOut,
 } from "lucide-react";
 
 const navItems = [
@@ -32,8 +34,10 @@ interface SidebarProps {
   accountName?: string;
 }
 
-export function Sidebar({ accountName = "Account" }: SidebarProps) {
+export function Sidebar({ accountName }: SidebarProps) {
   const pathname = usePathname();
+  const { user, logout } = useAuth();
+  const displayName = accountName ?? user?.account_name ?? "Account";
 
   return (
     <nav className="flex flex-col h-full w-56 shrink-0 border-r border-border bg-background">
@@ -44,18 +48,12 @@ export function Sidebar({ accountName = "Account" }: SidebarProps) {
 
       {/* Account switcher */}
       <div className="px-3 py-3 border-b border-border">
-        <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-foreground hover:bg-surface transition-colors duration-100 text-left">
-          <span className="flex-1 font-medium truncate">{accountName}</span>
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 10 10"
-            fill="none"
-            className="shrink-0 text-muted-foreground"
-          >
-            <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded text-sm text-foreground">
+          <span className="flex-1 font-medium truncate">{displayName}</span>
+        </div>
+        {user?.email && (
+          <p className="px-2 text-xs text-muted-foreground truncate">{user.email}</p>
+        )}
       </div>
 
       {/* Main nav */}
@@ -100,6 +98,13 @@ export function Sidebar({ accountName = "Account" }: SidebarProps) {
             </Link>
           );
         })}
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded text-sm text-muted-foreground hover:bg-surface hover:text-foreground transition-colors duration-100"
+        >
+          <LogOut size={15} strokeWidth={2} />
+          Sign out
+        </button>
       </div>
     </nav>
   );
