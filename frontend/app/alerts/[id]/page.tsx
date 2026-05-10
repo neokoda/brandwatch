@@ -68,7 +68,7 @@ export default function AlertDetailPage() {
         </div>
         <div className="ml-auto flex gap-2">
           {!alert.is_resolved && (
-            <Button size="sm" variant="outline" onClick={handleResolve} disabled={resolving}>
+            <Button size="sm" variant="default" onClick={handleResolve} disabled={resolving}>
               {resolving ? <Spinner /> : <><CheckCircle size={13} /> Resolve</>}
             </Button>
           )}

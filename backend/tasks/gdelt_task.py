@@ -10,6 +10,18 @@ logger = logging.getLogger(__name__)
 
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 
+# GDELT returns full language names; map to ISO 639-1 codes
+_GDELT_LANG_MAP = {
+    "english": "en", "french": "fr", "german": "de", "spanish": "es",
+    "portuguese": "pt", "italian": "it", "dutch": "nl", "russian": "ru",
+    "arabic": "ar", "chinese": "zh", "japanese": "ja", "korean": "ko",
+    "hindi": "hi", "thai": "th", "turkish": "tr", "polish": "pl",
+    "swedish": "sv", "norwegian": "no", "danish": "da", "finnish": "fi",
+    "indonesian": "id", "malay": "ms", "romanian": "ro", "ukrainian": "uk",
+    "czech": "cs", "hungarian": "hu", "greek": "el", "hebrew": "he",
+    "vietnamese": "vi", "persian": "fa",
+}
+
 
 async def run_gdelt_for_tracker(tracker_id: uuid.UUID):
     async with async_session_factory() as db:
@@ -17,7 +29,8 @@ async def run_gdelt_for_tracker(tracker_id: uuid.UUID):
         from backend.models.tracker import Tracker
         result = await db.execute(select(Tracker).where(Tracker.id == tracker_id, Tracker.is_active == True))  # noqa: E712
         tracker = result.scalar_one_or_none()
-        if not tracker or not tracker.keywords:
+        from backend.tasks.task_utils import tracker_allows_source
+        if not tracker or not tracker_allows_source(tracker, "gdelt") or not tracker.keywords:
             return
 
         keyword_query = " OR ".join(f'"{kw}"' for kw in tracker.keywords[:5])
@@ -27,7 +40,7 @@ async def run_gdelt_for_tracker(tracker_id: uuid.UUID):
             "mode": "artlist",
             "maxrecords": "75",
             "format": "json",
-            "timespan": "1d",
+            "timespan": "30min",  # short window so each run sees fresh articles; dedup filters overlap
         }
 
         data = None
@@ -69,8 +82,8 @@ async def run_gdelt_for_tracker(tracker_id: uuid.UUID):
                 source_url=article.get("url", ""),
                 source_domain=article.get("domain", ""),
                 author_name=article.get("domain", ""),
-                region_code=article.get("sourcecountry", ""),
-                language_code=article.get("sourcelang", ""),
+                region_code=article.get("sourcecountry") or None,
+                language_code=_GDELT_LANG_MAP.get((article.get("sourcelang") or "").lower()) or None,
                 content_text=article.get("title", "") + " " + article.get("seendatetime", ""),
                 keywords_matched=tracker.keywords,
                 raw_payload=article,

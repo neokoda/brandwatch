@@ -20,7 +20,8 @@ async def run_youtube_for_tracker(tracker_id: uuid.UUID):
         from backend.models.tracker import Tracker
         result = await db.execute(select(Tracker).where(Tracker.id == tracker_id, Tracker.is_active == True))  # noqa: E712
         tracker = result.scalar_one_or_none()
-        if not tracker or not tracker.keywords:
+        from backend.tasks.task_utils import tracker_allows_source
+        if not tracker or not tracker_allows_source(tracker, "youtube") or not tracker.keywords:
             return
 
         query = " ".join(tracker.keywords[:3])

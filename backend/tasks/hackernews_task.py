@@ -17,7 +17,8 @@ async def run_hackernews_for_tracker(tracker_id: uuid.UUID):
         from backend.models.tracker import Tracker
         result = await db.execute(select(Tracker).where(Tracker.id == tracker_id, Tracker.is_active == True))  # noqa: E712
         tracker = result.scalar_one_or_none()
-        if not tracker or not tracker.keywords:
+        from backend.tasks.task_utils import tracker_allows_source, strip_html
+        if not tracker or not tracker_allows_source(tracker, "hackernews") or not tracker.keywords:
             return
 
         cutoff_ts = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
@@ -43,7 +44,7 @@ async def run_hackernews_for_tracker(tracker_id: uuid.UUID):
                 object_id = hit.get("objectID", "")
                 item_type = "comment" if hit.get("parent_id") else "story"
                 url = hit.get("url") or f"https://news.ycombinator.com/item?id={object_id}"
-                text = (hit.get("story_text") or hit.get("comment_text") or hit.get("title") or "")[:2000]
+                text = strip_html(hit.get("story_text") or hit.get("comment_text") or hit.get("title") or "")[:2000]
                 if not text.strip():
                     continue
 

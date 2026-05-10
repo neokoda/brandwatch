@@ -55,7 +55,7 @@ export default function InsightsPage() {
               title="No insights yet"
               description="Cross-channel insights are generated when multiple trackers show concurrent elevated signals."
               action={
-                <Button size="sm" variant="outline" onClick={handleGenerate} disabled={generating}>
+                <Button size="sm" variant="default" onClick={handleGenerate} disabled={generating}>
                   <RefreshCw size={13} /> Generate now
                 </Button>
               }

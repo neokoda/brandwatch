@@ -42,6 +42,7 @@ class MentionOut(BaseModel):
     published_at: Optional[datetime]
     ingested_at: datetime
     engagement_score: float
+    engagement_raw: dict = {}
     sentiment_label: str
     sentiment_score: float
     emotion_label: Optional[str]

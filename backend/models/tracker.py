@@ -26,6 +26,8 @@ class Tracker(Base):
     languages: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     regions: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     rss_feeds: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
+    # Empty list = all sources enabled. Non-empty = only listed sources run.
+    sources: Mapped[List[str]] = mapped_column(ARRAY(String), default=list, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

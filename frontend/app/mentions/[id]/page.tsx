@@ -83,7 +83,7 @@ export default function MentionDetailPage() {
           <SentimentBadge label={mention.sentiment_label} />
           {mention.is_influencer && <Badge variant="warning">Influencer</Badge>}
           {mention.emotion_label && <Badge variant="muted">{mention.emotion_label}</Badge>}
-          {mention.topic_label && <Badge variant="outline">{mention.topic_label}</Badge>}
+          {mention.topic_label && <Badge variant="default">{mention.topic_label}</Badge>}
         </div>
         <a
           href={mention.source_url}
@@ -91,7 +91,7 @@ export default function MentionDetailPage() {
           rel="noreferrer"
           className="ml-auto"
         >
-          <Button size="sm" variant="outline"><ExternalLink size={13} /> Source</Button>
+          <Button size="sm" variant="default"><ExternalLink size={13} /> Source</Button>
         </a>
       </div>
 
@@ -114,7 +114,6 @@ export default function MentionDetailPage() {
               <MetaRow label="Source" value={mention.source_domain ?? "—"} />
               <MetaRow label="Language" value={mention.language_code ?? "—"} />
               <MetaRow label="Region" value={mention.region_code ?? "—"} />
-              <MetaRow label="Engagement" value={mention.engagement_score.toFixed(2)} />
               <MetaRow label="Sentiment score" value={mention.sentiment_score.toFixed(3)} />
               <MetaRow label="Published" value={mention.published_at ? fmtDt(mention.published_at) : "—"} />
               <MetaRow label="Ingested" value={fmtDt(mention.ingested_at)} />
@@ -125,6 +124,19 @@ export default function MentionDetailPage() {
                   <dd className="flex flex-wrap gap-1 mt-1">
                     {mention.keywords_matched.map((k) => (
                       <Badge key={k} variant="muted">{k}</Badge>
+                    ))}
+                  </dd>
+                </div>
+              )}
+              {Object.keys(mention.engagement_raw ?? {}).length > 0 && (
+                <div className="col-span-2">
+                  <dt className="text-muted-foreground mb-1">Engagement</dt>
+                  <dd className="flex flex-wrap gap-3">
+                    {Object.entries(mention.engagement_raw).map(([k, v]) => (
+                      <span key={k} className="text-xs px-2 py-1 bg-muted rounded">
+                        <span className="text-muted-foreground capitalize">{k.replace(/_/g, " ")}: </span>
+                        <span className="font-medium">{String(v)}</span>
+                      </span>
                     ))}
                   </dd>
                 </div>

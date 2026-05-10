@@ -14,7 +14,8 @@ async def run_rss_for_tracker(tracker_id: uuid.UUID):
         from backend.models.tracker import Tracker
         result = await db.execute(select(Tracker).where(Tracker.id == tracker_id, Tracker.is_active == True))  # noqa: E712
         tracker = result.scalar_one_or_none()
-        if not tracker or not tracker.rss_feeds:
+        from backend.tasks.task_utils import tracker_allows_source, strip_html
+        if not tracker or not tracker_allows_source(tracker, "rss") or not tracker.rss_feeds:
             return
 
         items = []
@@ -27,8 +28,8 @@ async def run_rss_for_tracker(tracker_id: uuid.UUID):
                         import time
                         published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
 
-                    content = entry.get("summary", "") or entry.get("title", "")
-                    title = entry.get("title", "")
+                    content = strip_html(entry.get("summary", "") or "")
+                    title = strip_html(entry.get("title", "") or "")
                     full_text = f"{title}. {content}"[:2000]
 
                     from urllib.parse import urlparse

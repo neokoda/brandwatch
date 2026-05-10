@@ -2,7 +2,7 @@ import { getToken } from "./auth";
 import type {
   Account, Alert, AuthUser, GeoPoint, IngestionRun, KPIs, LanguageBreakdown,
   Mention, MentionListResponse, SourceBreakdown, TopicCluster, Tracker,
-  TrendPoint, CrossChannelInsight, EmotionStat, AuthorStat,
+  TrendPoint, CrossChannelInsight, EmotionStat, AuthorStat, VelocityData,
 } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
@@ -92,6 +92,8 @@ export const analyticsApi = {
     request<EmotionStat[]>(`/analytics/emotions${_qs(params)}`),
   calendar: (params?: { tracker_id?: string }) =>
     request<{ date: string; total: number; negative_share: number }[]>(`/analytics/calendar${_qs(params)}`),
+  velocity: (params?: { tracker_id?: string }) =>
+    request<VelocityData>(`/analytics/velocity${_qs(params)}`),
 };
 
 // ── Alerts ────────────────────────────────────────────────────────────────────

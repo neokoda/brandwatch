@@ -92,8 +92,8 @@ export default function TriagePage() {
         {selected.size > 0 && (
           <div className="flex items-center gap-2 ml-2">
             <span className="text-sm text-muted-foreground">{selected.size} selected</span>
-            <Button size="sm" variant="outline" onClick={() => bulkUpdateStatus("in_review")}>Mark in review</Button>
-            <Button size="sm" variant="outline" onClick={() => bulkUpdateStatus("resolved")}>Mark resolved</Button>
+            <Button size="sm" variant="default" onClick={() => bulkUpdateStatus("in_review")}>Mark in review</Button>
+            <Button size="sm" variant="default" onClick={() => bulkUpdateStatus("resolved")}>Mark resolved</Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button>
           </div>
         )}

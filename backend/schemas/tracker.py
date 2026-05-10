@@ -5,6 +5,9 @@ from typing import Optional, List
 from pydantic import BaseModel
 
 
+ALL_SOURCES = ["gdelt", "youtube", "reddit", "rss", "hackernews", "bluesky", "mastodon", "playstore", "appstore"]
+
+
 class TrackerCreate(BaseModel):
     name: str
     tracker_type: str = "brand"
@@ -12,6 +15,7 @@ class TrackerCreate(BaseModel):
     languages: List[str] = []
     regions: List[str] = []
     rss_feeds: List[str] = []
+    sources: List[str] = []  # empty = all sources
 
 
 class TrackerUpdate(BaseModel):
@@ -21,6 +25,7 @@ class TrackerUpdate(BaseModel):
     languages: Optional[List[str]] = None
     regions: Optional[List[str]] = None
     rss_feeds: Optional[List[str]] = None
+    sources: Optional[List[str]] = None
     is_active: Optional[bool] = None
 
 
@@ -33,6 +38,7 @@ class TrackerOut(BaseModel):
     languages: List[str]
     regions: List[str]
     rss_feeds: List[str]
+    sources: List[str]
     is_active: bool
     created_at: datetime
 

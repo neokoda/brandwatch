@@ -1,7 +1,7 @@
 export type SentimentLabel = "positive" | "negative" | "neutral" | "unclassified";
 export type TriageStatus = "new" | "in_review" | "resolved" | "dismissed";
 export type AlertSeverity = "info" | "warning" | "critical";
-export type SourceChannel = "gdelt" | "youtube" | "reddit" | "rss";
+export type SourceChannel = "gdelt" | "youtube" | "reddit" | "rss" | "hackernews" | "bluesky" | "mastodon" | "playstore" | "appstore";
 
 export interface AuthUser {
   user_id: string;
@@ -21,6 +21,7 @@ export interface Tracker {
   languages: string[];
   regions: string[];
   rss_feeds: string[];
+  sources: string[];
   is_active: boolean;
   created_at: string;
 }
@@ -41,6 +42,7 @@ export interface Mention {
   published_at?: string;
   ingested_at: string;
   engagement_score: number;
+  engagement_raw: Record<string, unknown>;
   sentiment_label: SentimentLabel;
   sentiment_score: number;
   emotion_label?: string;
@@ -140,6 +142,7 @@ export interface LanguageBreakdown {
   language_code: string;
   mention_count: number;
   positive_share: number;
+  negative_share: number;
 }
 
 export interface EmotionStat {
@@ -154,6 +157,19 @@ export interface AuthorStat {
   avg_sentiment: number;
   is_influencer: boolean;
   total_engagement: number;
+  top_channel: string;
+}
+
+export interface VelocityData {
+  current_rate: number;
+  last_24h_mentions: number;
+  baseline_rate: number;
+  mentions_per_day: number;
+  velocity_ratio: number;
+  trend: "up" | "down" | "stable";
+  current_negative_share: number;
+  baseline_negative_share: number;
+  negativity_z: number;
 }
 
 export interface Account {
