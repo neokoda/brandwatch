@@ -30,7 +30,8 @@ function fmtDelta(v: number | undefined): string | undefined {
 export default function DashboardPage() {
   const { user } = useAuth();
   const [trackers, setTrackers] = useState<Tracker[]>([]);
-  const [trackerId, setTrackerId] = useState("");
+  // null = trackers not yet loaded (suppress analytics fetch); "" = all trackers
+  const [trackerId, setTrackerId] = useState<string | null>(null);
   const [kpis, setKpis] = useState<KPIs | null>(null);
   const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [sources, setSources] = useState<SourceBreakdown[]>([]);
@@ -42,14 +43,20 @@ export default function DashboardPage() {
   const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
-    trackersApi.list().then((ts) => {
-      setTrackers(ts);
-      // auto-select first tracker so the dashboard always shows single-tracker data
-      if (ts.length > 0) setTrackerId(ts[0].id);
-    }).catch(console.error);
+    trackersApi.list()
+      .then((ts) => {
+        setTrackers(ts);
+        // Always set trackerId — "" means account-wide view, never leaves loading stuck
+        setTrackerId(ts.length > 0 ? ts[0].id : "");
+      })
+      .catch(() => {
+        // On failure still unblock the analytics effect
+        setTrackerId("");
+      });
   }, []);
 
   useEffect(() => {
+    if (trackerId === null) return; // wait for trackers to load first
     setLoading(true);
     const params = trackerId ? { tracker_id: trackerId } : {};
     const granularity = trendDays <= 1 ? "hour" : "day";
@@ -92,7 +99,7 @@ export default function DashboardPage() {
         description={user?.account_name}
         action={
           <>
-            <TrackerSelector trackers={trackers} value={trackerId} onChange={setTrackerId} />
+            <TrackerSelector trackers={trackers} value={trackerId ?? ""} onChange={setTrackerId} />
             <Link href="/settings">
               <Button><Plus size={14} /> Add tracker</Button>
             </Link>

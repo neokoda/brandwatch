@@ -73,17 +73,25 @@ async def list_mentions(
     result = await db.execute(paginated)
     mentions = result.scalars().all()
 
+    # Batch-fetch tracker names and topic labels — avoids N+1 queries
+    tracker_ids = list({m.tracker_id for m in mentions})
+    topic_ids = list({m.topic_cluster_id for m in mentions if m.topic_cluster_id})
+
+    tracker_names: dict = {}
+    if tracker_ids:
+        tr = await db.execute(select(Tracker.id, Tracker.name).where(Tracker.id.in_(tracker_ids)))
+        tracker_names = {row[0]: row[1] for row in tr.all()}
+
+    topic_labels: dict = {}
+    if topic_ids:
+        tl = await db.execute(select(TopicCluster.id, TopicCluster.label).where(TopicCluster.id.in_(topic_ids)))
+        topic_labels = {row[0]: row[1] for row in tl.all()}
+
     items = []
     for m in mentions:
-        tracker_result = await db.execute(select(Tracker.name).where(Tracker.id == m.tracker_id))
-        tracker_name = tracker_result.scalar_one_or_none()
-        topic_label = None
-        if m.topic_cluster_id:
-            tc_result = await db.execute(select(TopicCluster.label).where(TopicCluster.id == m.topic_cluster_id))
-            topic_label = tc_result.scalar_one_or_none()
         item = MentionOut.model_validate(m)
-        item.tracker_name = tracker_name
-        item.topic_label = topic_label
+        item.tracker_name = tracker_names.get(m.tracker_id)
+        item.topic_label = topic_labels.get(m.topic_cluster_id) if m.topic_cluster_id else None
         items.append(item)
 
     return MentionListResponse(items=items, total=total, page=page, page_size=page_size)
@@ -141,23 +149,19 @@ async def get_mention(
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Mention)
+    from sqlalchemy import outerjoin
+    row = await db.execute(
+        select(Mention, Tracker.name.label("tracker_name"), TopicCluster.label.label("topic_label"))
         .join(Tracker, Mention.tracker_id == Tracker.id)
+        .outerjoin(TopicCluster, Mention.topic_cluster_id == TopicCluster.id)
         .where(Mention.id == mention_id, Tracker.account_id == current_user.account_id)
     )
-    mention = result.scalar_one_or_none()
-    if not mention:
+    result = row.first()
+    if not result:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Mention not found")
 
-    tracker_result = await db.execute(select(Tracker.name).where(Tracker.id == mention.tracker_id))
-    tracker_name = tracker_result.scalar_one_or_none()
-    topic_label = None
-    if mention.topic_cluster_id:
-        tc_result = await db.execute(select(TopicCluster.label).where(TopicCluster.id == mention.topic_cluster_id))
-        topic_label = tc_result.scalar_one_or_none()
-
+    mention, tracker_name, topic_label = result
     out = MentionOut.model_validate(mention)
     out.tracker_name = tracker_name
     out.topic_label = topic_label
@@ -188,3 +192,24 @@ async def update_triage(
     await db.commit()
     await db.refresh(mention)
     return MentionOut.model_validate(mention)
+
+
+@router.post("/{mention_id}/draft-reply")
+async def draft_reply(
+    mention_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Mention)
+        .join(Tracker, Mention.tracker_id == Tracker.id)
+        .where(Mention.id == mention_id, Tracker.account_id == current_user.account_id)
+    )
+    mention = result.scalar_one_or_none()
+    if not mention:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Mention not found")
+
+    from backend.services.agent import draft_mention_reply
+    draft = await draft_mention_reply(db, mention, current_user.account_id)
+    return {"draft_reply": draft}

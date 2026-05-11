@@ -17,15 +17,14 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-HF_ROUTER = "https://router.huggingface.co/hf-inference/models"
-HF_BASE = "https://api-inference.huggingface.co/models"
+_HF_ROUTER = "https://router.huggingface.co/hf-inference/models"
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"   # feature-extraction; all-MiniLM-L6-v2 returns 404 on new router
 
 
 async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     """Recluster mentions for a tracker. Returns number of clusters created."""
     result = await db.execute(
-        select(Mention.id, Mention.content_text)
+        select(Mention.id, Mention.content_text, Mention.sentiment_score)
         .where(Mention.tracker_id == tracker_id, Mention.language_code == "en")
         .order_by(Mention.ingested_at.desc())
         .limit(2000)
@@ -34,17 +33,18 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
 
     # Filter out very short or mostly non-ASCII texts
     clean_rows = [
-        (r[0], r[1]) for r in rows
+        (r[0], r[1], r[2]) for r in rows
         if len(r[1].strip()) >= 30
         and sum(1 for c in r[1] if ord(c) < 128) / max(len(r[1]), 1) >= 0.85
     ]
 
-    if len(clean_rows) < 10:
+    if len(clean_rows) < 8:
         logger.info("recluster_tracker %s: only %d clean EN texts, skipping", tracker_id, len(clean_rows))
         return 0
 
     ids = [r[0] for r in clean_rows]
     texts = [r[1][:512] for r in clean_rows]
+    sentiment_scores = [r[2] if r[2] is not None else 0.5 for r in clean_rows]
 
     embeddings = await _get_embeddings(texts)
     if embeddings is None:
@@ -67,6 +67,7 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     for cluster_texts, cluster_indices, keywords in clusters:
         label = await _label_cluster(keywords, cluster_texts[:3])
         mention_ids = [ids[i] for i in cluster_indices]
+        avg_sentiment = round(sum(sentiment_scores[i] for i in cluster_indices) / len(cluster_indices), 3)
 
         cluster = TopicCluster(
             id=uuid.uuid4(),
@@ -75,7 +76,7 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
             label_raw=", ".join(keywords[:5]),
             keywords=keywords[:10],
             mention_count=len(mention_ids),
-            sentiment_avg=0.0,
+            sentiment_avg=avg_sentiment,
             period_start=now,
             period_end=now,
         )
@@ -96,7 +97,7 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
 async def _get_embeddings(texts: list[str]) -> np.ndarray | None:
     """Embed texts in batches of 32 using the HF router endpoint."""
     import asyncio
-    url = f"{HF_ROUTER}/{EMBEDDING_MODEL}"
+    url = f"{_HF_ROUTER}/{EMBEDDING_MODEL}"
     headers = {"Authorization": f"Bearer {settings.HUGGINGFACE_API_TOKEN}"}
     batch_size = 32
     all_embeddings = []
@@ -132,9 +133,9 @@ def _cluster(embeddings: np.ndarray, texts: list[str]) -> list[tuple]:
         from umap import UMAP
         import hdbscan
 
-        n_components = min(5, n - 1)
-        n_neighbors = min(15, n - 1)
-        reduced = UMAP(n_components=n_components, n_neighbors=n_neighbors, min_dist=0.0, metric="cosine").fit_transform(embeddings)
+        n_components = min(5, max(2, n - 2))
+        n_neighbors = min(15, max(2, n - 2))
+        reduced = UMAP(n_components=n_components, n_neighbors=n_neighbors, min_dist=0.0, metric="cosine", random_state=42).fit_transform(embeddings)
         labels = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, metric="euclidean").fit_predict(reduced)
         logger.info("HDBSCAN: %d texts → %d clusters (noise: %d)", n, len(set(labels)) - (1 if -1 in labels else 0), sum(1 for l in labels if l == -1))
     except Exception as exc:
@@ -187,45 +188,34 @@ def _ctfidf_keywords(cluster_texts: list[str], all_texts: list[str]) -> list[str
 
 
 async def _label_cluster(keywords: list[str], examples: list[str]) -> str:
-    """Generate a short topic label from keywords.
-
-    Tries HF LLM first; falls back to a keyword-combination heuristic.
-    HF text-generation models are frequently unavailable on the free tier,
-    so the fallback is designed to produce readable labels on its own.
-    """
+    """Generate a short topic label via Gemma 4, falling back to a keyword heuristic."""
     if not keywords:
         return "Unlabeled"
 
-    # --- HF LLM attempt ---
-    if settings.HUGGINGFACE_API_TOKEN:
-        model = "mistralai/Mistral-7B-Instruct-v0.3"
-        url = f"{HF_ROUTER}/{model}"
-        headers = {"Authorization": f"Bearer {settings.HUGGINGFACE_API_TOKEN}"}
-        keyword_str = ", ".join(keywords[:8])
-        examples_str = "\n".join(f"- {e[:100]}" for e in examples)
-        prompt = (
-            f"Keywords: {keyword_str}\n"
-            f"Example mentions:\n{examples_str}\n\n"
-            "Give this topic a short label (3-5 words). Respond with only the label."
-        )
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.post(
-                    url, headers=headers,
-                    json={"inputs": prompt, "parameters": {"max_new_tokens": 20, "return_full_text": False}},
-                )
-                if resp.status_code == 200:
-                    text = resp.json()[0]["generated_text"].strip().split("\n")[0]
-                    if text:
-                        return text[:80]
-        except Exception:
-            pass
+    from backend.services.gemini import gemma_chat
 
-    # --- Keyword heuristic fallback ---
-    # Prefer bigrams (more descriptive) over single words
+    keyword_str = ", ".join(keywords[:8])
+    examples_str = "\n".join(f"- {e[:100]}" for e in examples)
+    label = await gemma_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"Keywords: {keyword_str}\n"
+                    f"Example mentions:\n{examples_str}\n\n"
+                    "Give this topic a short label (3-5 words). Reply with only the label, nothing else."
+                ),
+            }
+        ],
+        max_tokens=20,
+        temperature=0.3,
+    )
+    if label:
+        return label.split("\n")[0][:80]
+
+    # Keyword heuristic fallback
     bigrams = [k for k in keywords if " " in k]
     unigrams = [k for k in keywords if " " not in k and len(k) > 3]
-    # Build label from best bigram + best unigram, or two bigrams, or two unigrams
     parts: list[str] = []
     if bigrams:
         parts.append(bigrams[0])

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, text
 
 from backend.database import get_db
 from backend.auth import get_current_user
@@ -99,55 +99,55 @@ async def trends(
     db: AsyncSession = Depends(get_db),
 ):
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    q = (
-        _account_mention_query(current_user.account_id, tracker_id)
-        .where(Mention.ingested_at >= since)
-    )
-    result = await db.execute(q)
-    mentions = result.scalars().all()
 
-    from collections import defaultdict
-    buckets: dict[datetime, dict] = defaultdict(lambda: {"total": 0, "positive": 0, "negative": 0, "neutral": 0, "sentiment_sum": 0.0, "engagement_sum": 0.0})
-
-    for m in mentions:
-        ts = m.ingested_at
-        if granularity == "hour":
-            key = ts.replace(minute=0, second=0, microsecond=0)
-        elif granularity == "week":
-            key = ts.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=ts.weekday())
-        else:
-            key = ts.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        b = buckets[key]
-        b["total"] += 1
-        b[m.sentiment_label] = b.get(m.sentiment_label, 0) + 1
-        b["sentiment_sum"] += m.sentiment_score
-        b["engagement_sum"] += m.engagement_score
-
-    # Fill zero-count buckets so the chart renders as a continuous line
-    now_ts = datetime.now(timezone.utc)
+    trunc_unit = "hour" if granularity == "hour" else ("week" if granularity == "week" else "day")
     if granularity == "hour":
-        cursor = since.replace(minute=0, second=0, microsecond=0)
         step = timedelta(hours=1)
+        cursor_start = since.replace(minute=0, second=0, microsecond=0)
     elif granularity == "week":
-        cursor = since.replace(hour=0, minute=0, second=0, microsecond=0)
         step = timedelta(weeks=1)
+        cursor_start = since.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=since.weekday())
     else:
-        cursor = since.replace(hour=0, minute=0, second=0, microsecond=0)
         step = timedelta(days=1)
+        cursor_start = since.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    empty = {"total": 0, "positive": 0, "negative": 0, "neutral": 0, "sentiment_sum": 0.0, "engagement_sum": 0.0}
+    base_sq = (
+        select(Mention.id, Mention.ingested_at, Mention.sentiment_label, Mention.sentiment_score, Mention.engagement_score)
+        .join(Tracker, Mention.tracker_id == Tracker.id)
+        .where(Tracker.account_id == current_user.account_id, Mention.ingested_at >= since)
+    )
+    if tracker_id:
+        base_sq = base_sq.where(Mention.tracker_id == tracker_id)
+    sq = base_sq.subquery()
+
+    agg_q = select(
+        func.date_trunc(trunc_unit, sq.c.ingested_at).label("bucket"),
+        func.count(sq.c.id).label("total"),
+        func.sum(case((sq.c.sentiment_label == "positive", 1), else_=0)).label("positive"),
+        func.sum(case((sq.c.sentiment_label == "negative", 1), else_=0)).label("negative"),
+        func.sum(case((sq.c.sentiment_label == "neutral", 1), else_=0)).label("neutral"),
+        func.avg(sq.c.sentiment_score).label("avg_sentiment"),
+        func.avg(sq.c.engagement_score).label("avg_engagement"),
+    ).select_from(sq).group_by(text("bucket")).order_by(text("bucket"))
+
+    result = await db.execute(agg_q)
+    rows = result.all()
+
+    buckets: dict = {r.bucket.replace(tzinfo=timezone.utc) if r.bucket.tzinfo is None else r.bucket: r for r in rows}
+
+    now_ts = datetime.now(timezone.utc)
     results = []
+    cursor = cursor_start.replace(tzinfo=timezone.utc) if cursor_start.tzinfo is None else cursor_start
     while cursor <= now_ts:
-        v = buckets.get(cursor, empty)
+        r = buckets.get(cursor)
         results.append(TrendPoint(
             bucket=cursor,
-            total=v["total"],
-            positive=v.get("positive", 0),
-            negative=v.get("negative", 0),
-            neutral=v.get("neutral", 0),
-            avg_sentiment=round(v["sentiment_sum"] / v["total"], 3) if v["total"] else 0,
-            avg_engagement=round(v["engagement_sum"] / v["total"], 3) if v["total"] else 0,
+            total=r.total if r else 0,
+            positive=r.positive if r else 0,
+            negative=r.negative if r else 0,
+            neutral=r.neutral if r else 0,
+            avg_sentiment=round(float(r.avg_sentiment or 0), 3) if r else 0,
+            avg_engagement=round(float(r.avg_engagement or 0), 3) if r else 0,
         ))
         cursor += step
     return results
@@ -358,18 +358,33 @@ async def velocity(
     current_hour = now.replace(minute=0, second=0, microsecond=0)
     window_start = now - timedelta(days=7)
 
-    q = _account_mention_query(current_user.account_id, tracker_id).where(Mention.ingested_at >= window_start)
-    result = await db.execute(q)
-    mentions = result.scalars().all()
+    # SQL GROUP BY hour — avoids loading all ORM objects
+    base_sq = (
+        select(Mention.id, Mention.ingested_at, Mention.sentiment_label)
+        .join(Tracker, Mention.tracker_id == Tracker.id)
+        .where(Tracker.account_id == current_user.account_id, Mention.ingested_at >= window_start)
+    )
+    if tracker_id:
+        base_sq = base_sq.where(Mention.tracker_id == tracker_id)
+    sq = base_sq.subquery()
 
-    # Bucket by hour
-    from collections import defaultdict
-    hourly: dict = defaultdict(lambda: {"total": 0, "neg": 0})
-    for m in mentions:
-        hk = m.ingested_at.replace(minute=0, second=0, microsecond=0)
-        hourly[hk]["total"] += 1
-        if m.sentiment_label == "negative":
-            hourly[hk]["neg"] += 1
+    agg_result = await db.execute(
+        select(
+            func.date_trunc("hour", sq.c.ingested_at).label("hour_bucket"),
+            func.count(sq.c.id).label("total"),
+            func.sum(case((sq.c.sentiment_label == "negative", 1), else_=0)).label("neg"),
+        ).select_from(sq)
+        .group_by(text("hour_bucket"))
+        .order_by(text("hour_bucket"))
+    )
+    rows = agg_result.all()
+
+    hourly: dict = {}
+    for r in rows:
+        hk = r.hour_bucket
+        if hk.tzinfo is None:
+            hk = hk.replace(tzinfo=timezone.utc)
+        hourly[hk] = {"total": r.total, "neg": r.neg}
 
     current_bucket = hourly.get(current_hour, {"total": 0, "neg": 0})
     current_rate = float(current_bucket["total"])

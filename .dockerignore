@@ -1,0 +1,30 @@
+# Dev/IDE
+.git
+.gitignore
+**/.env
+backend/.env
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.pytest_cache
+*.egg-info
+
+# Frontend — not needed in backend image
+frontend/
+node_modules/
+
+# n8n config
+n8n/
+
+# Docs
+docs/
+*.md
+!backend/requirements.txt
+
+# Local scripts
+backend/scripts/
+backend/alembic/versions/
+
+# Misc
+.DS_Store
+Thumbs.db

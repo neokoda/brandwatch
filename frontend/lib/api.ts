@@ -15,13 +15,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail ?? "Request failed");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+
+  try {
+    const res = await fetch(`${BASE}${path}`, { ...options, headers, signal: controller.signal });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail ?? "Request failed");
+    }
+    if (res.status === 204) return undefined as T;
+    return res.json();
+  } finally {
+    clearTimeout(timer);
   }
-  if (res.status === 204) return undefined as T;
-  return res.json();
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -71,6 +78,8 @@ export const mentionsApi = {
   get: (id: string) => request<Mention>(`/mentions/${id}`),
   triage: (id: string, data: { triage_status?: string; triage_priority?: string; triage_assignee?: string; triage_note?: string }) =>
     request<Mention>(`/mentions/${id}/triage`, { method: "PATCH", body: JSON.stringify(data) }),
+  draftReply: (id: string) =>
+    request<{ draft_reply: string | null }>(`/mentions/${id}/draft-reply`, { method: "POST" }),
 };
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
@@ -126,6 +135,23 @@ export const insightsApi = {
   generate: () => request<{ status: string }>("/insights/generate", { method: "POST" }),
 };
 
+// ── Saved Filters ─────────────────────────────────────────────────────────────
+
+export interface SavedFilter {
+  id: string;
+  name: string;
+  tracker_id?: string | null;
+  filter_params: Record<string, string | number | boolean>;
+  created_by?: string | null;
+}
+
+export const filtersApi = {
+  list: () => request<SavedFilter[]>("/filters"),
+  create: (data: { name: string; tracker_id?: string; filter_params: Record<string, string | number | boolean> }) =>
+    request<SavedFilter>("/filters", { method: "POST", body: JSON.stringify(data) }),
+  delete: (id: string) => request<void>(`/filters/${id}`, { method: "DELETE" }),
+};
+
 // ── Ingestion ─────────────────────────────────────────────────────────────────
 
 export const ingestApi = {
@@ -136,8 +162,11 @@ export const ingestApi = {
 // ── Export ────────────────────────────────────────────────────────────────────
 
 export const exportApi = {
-  mentionsCsvUrl: (params?: { tracker_id?: string; days?: number }) =>
-    `${BASE}/export/mentions.csv${_qs(params)}`,
+  mentionsCsvUrl: (params?: {
+    tracker_id?: string; days?: number; token?: string;
+    sentiment?: string; source?: string; search?: string;
+    language?: string; region?: string; date_from?: string; date_to?: string;
+  }) => `${BASE}/export/mentions.csv${_qs(params)}`,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

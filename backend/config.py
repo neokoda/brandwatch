@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     HUGGINGFACE_API_TOKEN: str = ""
+    GOOGLE_AI_API_KEY: str = ""
     YOUTUBE_API_KEY: str = ""
     REDDIT_CLIENT_ID: str = ""
     REDDIT_CLIENT_SECRET: str = ""

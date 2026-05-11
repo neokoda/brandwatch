@@ -15,7 +15,7 @@ import { SourceBadge } from "@/components/shared/source-badge";
 import { mentionsApi } from "@/lib/api";
 import { useAuth } from "@/components/providers/auth-provider";
 import type { Mention } from "@/lib/types";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, Sparkles, Copy, Check } from "lucide-react";
 
 function fmtDt(iso: string) {
   return new Date(iso).toLocaleString();
@@ -34,6 +34,10 @@ export default function MentionDetailPage() {
   const [assignee, setAssignee] = useState("");
   const [note, setNote] = useState("");
 
+  const [draftReply, setDraftReply] = useState<string | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     mentionsApi.get(id).then((m) => {
       setMention(m);
@@ -43,6 +47,30 @@ export default function MentionDetailPage() {
       setNote(m.triage_note ?? "");
     }).finally(() => setLoading(false));
   }, [id]);
+
+  async function generateDraft() {
+    setDraftLoading(true);
+    try {
+      const res = await mentionsApi.draftReply(id);
+      setDraftReply(res.draft_reply ?? "No response from agent. Configure an agent webhook in Settings → Agent.");
+    } catch {
+      setDraftReply("Failed to generate draft. Ensure the agent webhook is configured in Settings → Agent.");
+    } finally {
+      setDraftLoading(false);
+    }
+  }
+
+  function copyDraft() {
+    if (!draftReply) return;
+    navigator.clipboard.writeText(draftReply);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  function useDraftAsNote() {
+    if (!draftReply) return;
+    setNote(draftReply);
+  }
 
   async function saveTriage() {
     if (!mention) return;
@@ -189,6 +217,35 @@ export default function MentionDetailPage() {
             <Button className="w-full" onClick={saveTriage} disabled={saving}>
               {saving ? <Spinner /> : "Save"}
             </Button>
+          </div>
+
+          {/* AI Draft Reply */}
+          <div className="mt-6">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-4">AI Draft Reply</p>
+            <div className="border border-border rounded-lg p-4 space-y-3">
+              {draftReply ? (
+                <>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">{draftReply}</p>
+                  <div className="flex gap-2 pt-1">
+                    <Button size="sm" variant="ghost" onClick={copyDraft} className="flex-1 gap-1.5">
+                      {copied ? <Check size={13} /> : <Copy size={13} />}
+                      {copied ? "Copied" : "Copy"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={useDraftAsNote} className="flex-1 gap-1.5 text-xs">
+                      Use as note
+                    </Button>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={generateDraft} disabled={draftLoading} className="w-full text-muted-foreground">
+                    {draftLoading ? <Spinner /> : "Regenerate"}
+                  </Button>
+                </>
+              ) : (
+                <Button className="w-full gap-2" variant="default" onClick={generateDraft} disabled={draftLoading}>
+                  {draftLoading ? <Spinner /> : <Sparkles size={14} />}
+                  {draftLoading ? "Generating…" : "Generate Draft Reply"}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>

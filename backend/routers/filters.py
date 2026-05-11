@@ -25,7 +25,7 @@ async def list_filters(current_user=Depends(get_current_user), db: AsyncSession 
         select(SavedFilter).where(SavedFilter.account_id == current_user.account_id)
     )
     filters = result.scalars().all()
-    return [{"id": str(f.id), "name": f.name, "filter_params": f.filter_params} for f in filters]
+    return [{"id": str(f.id), "name": f.name, "tracker_id": str(f.tracker_id) if f.tracker_id else None, "filter_params": f.filter_params} for f in filters]
 
 
 @router.post("", status_code=201)
@@ -44,7 +44,7 @@ async def create_filter(
     )
     db.add(f)
     await db.commit()
-    return {"id": str(f.id), "name": f.name}
+    return {"id": str(f.id), "name": f.name, "tracker_id": str(f.tracker_id) if f.tracker_id else None, "filter_params": f.filter_params}
 
 
 @router.delete("/{filter_id}", status_code=204)

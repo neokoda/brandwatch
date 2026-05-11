@@ -41,10 +41,13 @@ async def run_youtube_for_tracker(tracker_id: uuid.UUID):
                 search_resp.raise_for_status()
                 videos = search_resp.json().get("items", [])
 
+                from backend.tasks.task_utils import strip_html, mention_matches_keywords
                 for video in videos:
                     video_id = video.get("id", {}).get("videoId")
                     if not video_id:
                         continue
+                    video_title = strip_html(video.get("snippet", {}).get("title", ""))
+                    video_channel = video.get("snippet", {}).get("channelTitle", "")
 
                     # Get comments
                     comments_resp = await client.get(YT_COMMENTS_URL, params={
@@ -56,12 +59,15 @@ async def run_youtube_for_tracker(tracker_id: uuid.UUID):
                     })
                     if comments_resp.status_code != 200:
                         continue
-                    from backend.tasks.task_utils import strip_html, mention_matches_keywords
                     for thread in comments_resp.json().get("items", []):
                         top = thread.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
                         like_count = top.get("likeCount", 0)
-                        text = strip_html(top.get("textDisplay", ""))
-                        if not text or not mention_matches_keywords(text, tracker.keywords):
+                        comment_text = strip_html(top.get("textDisplay", ""))
+                        if not comment_text:
+                            continue
+                        # Prefix video title so the comment is contextualized and keyword-matchable
+                        full_text = f"[Video: {video_title}]\n{comment_text}" if video_title else comment_text
+                        if not mention_matches_keywords(full_text, tracker.keywords):
                             continue
                         items_to_ingest.append({
                             "source_channel": "youtube",
@@ -69,10 +75,10 @@ async def run_youtube_for_tracker(tracker_id: uuid.UUID):
                             "source_domain": "youtube.com",
                             "author_name": top.get("authorDisplayName"),
                             "author_id": top.get("authorChannelId", {}).get("value"),
-                            "content_text": text,
+                            "content_text": full_text,
                             "engagement_raw": {"likes": like_count},
-                            "keywords_matched": [kw for kw in tracker.keywords if kw.lower() in text.lower()],
-                            "raw_payload": thread,
+                            "keywords_matched": [kw for kw in tracker.keywords if kw.lower() in full_text.lower()],
+                            "raw_payload": {"thread": thread, "video_title": video_title, "video_channel": video_channel},
                         })
         except Exception as exc:
             logger.warning("YouTube fetch error for tracker %s: %s", tracker_id, exc)

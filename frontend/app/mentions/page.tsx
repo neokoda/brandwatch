@@ -15,10 +15,11 @@ import { SentimentBadge } from "@/components/shared/sentiment-badge";
 import { SourceBadge } from "@/components/shared/source-badge";
 import { TrackerSelector } from "@/components/shared/tracker-selector";
 import { useMentionStream } from "@/lib/sse";
-import { mentionsApi, trackersApi, exportApi } from "@/lib/api";
+import { mentionsApi, trackersApi, exportApi, filtersApi } from "@/lib/api";
+import type { SavedFilter } from "@/lib/api";
 import { useAuth } from "@/components/providers/auth-provider";
 import type { Mention, Tracker } from "@/lib/types";
-import { Download, Search, RefreshCw } from "lucide-react";
+import { Download, Search, RefreshCw, Bookmark, BookmarkCheck, ChevronDown } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 function fmtTime(iso: string) {
@@ -48,8 +49,15 @@ export default function MentionsPage() {
   const [loading, setLoading] = useState(true);
   const [liveCount, setLiveCount] = useState(0);
 
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
+  const [filterName, setFilterName] = useState("");
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const [savingFilter, setSavingFilter] = useState(false);
+  const [showFiltersDropdown, setShowFiltersDropdown] = useState(false);
+
   useEffect(() => {
     trackersApi.list().then(setTrackers).catch(console.error);
+    filtersApi.list().then(setSavedFilters).catch(console.error);
   }, []);
 
   const load = useCallback(async (p = 1) => {
@@ -86,7 +94,58 @@ export default function MentionsPage() {
   );
 
   const token = getToken();
-  const exportUrl = exportApi.mentionsCsvUrl(trackerId ? { tracker_id: trackerId } : undefined);
+  const exportUrl = exportApi.mentionsCsvUrl({
+    tracker_id: trackerId || undefined,
+    sentiment: sentiment || undefined,
+    source: source || undefined,
+    search: search || undefined,
+    language: language || undefined,
+    region: region || undefined,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+    token: token ?? undefined,
+  });
+
+  async function saveFilter() {
+    if (!filterName.trim()) return;
+    setSavingFilter(true);
+    try {
+      const params: Record<string, string | number | boolean> = {};
+      if (trackerId) params.tracker_id = trackerId;
+      if (sentiment) params.sentiment = sentiment;
+      if (source) params.source = source;
+      if (search) params.search = search;
+      if (language) params.language = language;
+      if (region) params.region = region;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      const saved = await filtersApi.create({ name: filterName.trim(), tracker_id: trackerId || undefined, filter_params: params });
+      setSavedFilters((prev) => [...prev, saved]);
+      setFilterName("");
+      setShowSaveInput(false);
+    } catch {
+      /* noop */
+    } finally {
+      setSavingFilter(false);
+    }
+  }
+
+  function applyFilter(f: SavedFilter) {
+    const p = f.filter_params;
+    setTrackerId((p.tracker_id as string) ?? "");
+    setSentiment((p.sentiment as string) ?? "");
+    setSource((p.source as string) ?? "");
+    setSearch((p.search as string) ?? "");
+    setLanguage((p.language as string) ?? "");
+    setRegion((p.region as string) ?? "");
+    setDateFrom((p.date_from as string) ?? "");
+    setDateTo((p.date_to as string) ?? "");
+  }
+
+  async function deleteFilter(id: string) {
+    await filtersApi.delete(id);
+    setSavedFilters((prev) => prev.filter((f) => f.id !== id));
+  }
 
   return (
     <AppShell accountName={user?.account_name}>
@@ -104,7 +163,7 @@ export default function MentionsPage() {
                 {liveCount} new
               </button>
             )}
-            <a href={`${exportUrl}&token=${token}`} target="_blank" rel="noreferrer">
+            <a href={exportUrl} target="_blank" rel="noreferrer">
               <Button size="sm" variant="default"><Download size={13} /> Export CSV</Button>
             </a>
           </div>
@@ -148,7 +207,66 @@ export default function MentionsPage() {
           <Button size="icon" variant="default" onClick={() => load(1)} title="Refresh">
             <RefreshCw size={14} />
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowSaveInput((v) => !v)}
+            className="text-muted-foreground gap-1.5"
+            title="Save current filters"
+          >
+            {showSaveInput ? <BookmarkCheck size={13} /> : <Bookmark size={13} />}
+            Save filter
+          </Button>
+          {savedFilters.length > 0 && (
+            <div className="relative">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground gap-1.5"
+                onClick={() => setShowFiltersDropdown((v) => !v)}
+              >
+                <ChevronDown size={13} /> Saved filters
+              </Button>
+              {showFiltersDropdown && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowFiltersDropdown(false)} />
+                  <div className="absolute left-0 top-full mt-1 z-20 min-w-[180px] bg-background border border-border rounded-lg shadow-lg py-1">
+                    {savedFilters.map((f) => (
+                      <div key={f.id} className="flex items-center justify-between px-3 py-1.5 hover:bg-muted cursor-pointer text-sm">
+                        <span
+                          onClick={() => { applyFilter(f); setShowFiltersDropdown(false); }}
+                          className="flex-1 truncate"
+                        >{f.name}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteFilter(f.id); }}
+                          className="text-muted-foreground hover:text-destructive ml-2 text-xs"
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
+
+        {showSaveInput && (
+          <div className="flex items-center gap-2 pt-1">
+            <Input
+              className="w-52"
+              placeholder="Filter name…"
+              value={filterName}
+              onChange={(e) => setFilterName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveFilter()}
+            />
+            <Button size="sm" onClick={saveFilter} disabled={savingFilter || !filterName.trim()}>
+              {savingFilter ? <Spinner /> : "Save"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => { setShowSaveInput(false); setFilterName(""); }}>
+              Cancel
+            </Button>
+          </div>
+        )}
 
         {showAdvanced && (
           <div className="flex flex-wrap gap-3 pt-1">

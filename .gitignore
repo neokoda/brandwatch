@@ -2,3 +2,4 @@
 SPECS.md
 CLAUDE.md
 .env
+deploy/cloudrun-env.yaml
