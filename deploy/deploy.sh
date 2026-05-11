@@ -7,7 +7,7 @@ set -e
 PROJECT_ID="tsunami-sentiment"
 REGION="asia-southeast1"
 SERVICE="brandwatch-backend"
-IMAGE="gcr.io/${PROJECT_ID}/${SERVICE}"
+IMAGE="asia-southeast1-docker.pkg.dev/${PROJECT_ID}/brandwatch/${SERVICE}"
 
 echo "==> Building and pushing image to GCR..."
 gcloud builds submit \

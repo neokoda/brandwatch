@@ -6,6 +6,11 @@ const labels: Record<SourceChannel, string> = {
   youtube: "YouTube",
   reddit: "Reddit",
   rss: "RSS",
+  hackernews: "HN",
+  bluesky: "Bluesky",
+  mastodon: "Mastodon",
+  playstore: "Play Store",
+  appstore: "App Store",
 };
 
 export function SourceBadge({ channel }: { channel: SourceChannel }) {

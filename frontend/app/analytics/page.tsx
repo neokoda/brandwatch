@@ -36,7 +36,7 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [trendLoading, setTrendLoading] = useState(false);
   const trendInitialized = useRef(false);
-  const [trendRange, setTrendRange] = useState(TREND_RANGES[1]);
+  const [trendRange, setTrendRange] = useState<typeof TREND_RANGES[number]>(TREND_RANGES[1]);
 
   const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [geo, setGeo] = useState<GeoPoint[]>([]);
@@ -211,7 +211,7 @@ export default function AnalyticsPage() {
                         />
                         <Tooltip
                           contentStyle={tooltipStyle}
-                          formatter={(v: number) => [`${v}%`, "Share"]}
+                          formatter={(v) => [`${Number(v ?? 0).toFixed(1)}%`, "Share"]}
                         />
                       </RadarChart>
                     </ResponsiveContainer>

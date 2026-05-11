@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
@@ -13,7 +12,7 @@ import { SentimentBadge } from "@/components/shared/sentiment-badge";
 import { SourceBadge } from "@/components/shared/source-badge";
 import { topicsApi } from "@/lib/api";
 import { useAuth } from "@/components/providers/auth-provider";
-import type { TopicCluster, Mention } from "@/lib/types";
+import type { Mention } from "@/lib/types";
 import { ArrowLeft } from "lucide-react";
 
 export default function TopicDetailPage() {

@@ -23,6 +23,12 @@ EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"   # feature-extraction; all-MiniLM-L6
 
 async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     """Recluster mentions for a tracker. Returns number of clusters created."""
+    from backend.models.tracker import Tracker
+    tracker_result = await db.execute(select(Tracker).where(Tracker.id == tracker_id))
+    tracker = tracker_result.scalar_one_or_none()
+    tracker_name = tracker.name if tracker else "Unknown"
+    tracker_keywords = tracker.keywords[:5] if tracker and tracker.keywords else []
+
     result = await db.execute(
         select(Mention.id, Mention.content_text, Mention.sentiment_score)
         .where(Mention.tracker_id == tracker_id, Mention.language_code == "en")
@@ -65,7 +71,7 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     now = datetime.now(timezone.utc)
     created = 0
     for cluster_texts, cluster_indices, keywords in clusters:
-        label = await _label_cluster(keywords, cluster_texts[:3])
+        label = await _label_cluster(keywords, cluster_texts[:5], tracker_name, tracker_keywords)
         mention_ids = [ids[i] for i in cluster_indices]
         avg_sentiment = round(sum(sentiment_scores[i] for i in cluster_indices) / len(cluster_indices), 3)
 
@@ -187,33 +193,59 @@ def _ctfidf_keywords(cluster_texts: list[str], all_texts: list[str]) -> list[str
         return []
 
 
-async def _label_cluster(keywords: list[str], examples: list[str]) -> str:
-    """Generate a short topic label via Gemma 4, falling back to a keyword heuristic."""
+async def _label_cluster(
+    keywords: list[str],
+    examples: list[str],
+    tracker_name: str = "",
+    tracker_keywords: list[str] = [],
+) -> str:
+    """Generate a specific topic label via Gemma 4, falling back to a keyword heuristic."""
     if not keywords:
         return "Unlabeled"
 
     from backend.services.gemini import gemma_chat
 
-    keyword_str = ", ".join(keywords[:8])
-    examples_str = "\n".join(f"- {e[:100]}" for e in examples)
+    keyword_str = ", ".join(keywords[:10])
+    examples_str = "\n".join(f"- {e[:250]}" for e in examples[:5])
+    brand_ctx = f"Brand being tracked: {tracker_name}"
+    if tracker_keywords:
+        brand_ctx += f" (monitored keywords: {', '.join(tracker_keywords)})"
+
     label = await gemma_chat(
         messages=[
             {
+                "role": "system",
+                "content": (
+                    f"You label clusters of brand mentions. {brand_ctx}. "
+                    "Labels must be specific to the actual issue — NOT generic. "
+                    "Bad: 'Customer Issues', 'Brand Problems', 'Negative Feedback'. "
+                    "Good: 'Drive-Thru Wait Times', 'App Payment Failures', 'Price Increase Complaints'. "
+                    "Reply with only the label, 3-5 words, no punctuation."
+                ),
+            },
+            {
                 "role": "user",
                 "content": (
-                    f"Keywords: {keyword_str}\n"
-                    f"Example mentions:\n{examples_str}\n\n"
-                    "Give this topic a short label (3-5 words). Reply with only the label, nothing else."
+                    f"Keywords from this cluster: {keyword_str}\n\n"
+                    f"Sample mentions:\n{examples_str}\n\n"
+                    "Label:"
                 ),
-            }
+            },
         ],
-        max_tokens=20,
-        temperature=0.3,
+        max_tokens=25,
+        temperature=0.2,
     )
     if label:
-        return label.split("\n")[0][:80]
+        # Strip any leading "Label:" or quotes Gemma might add
+        cleaned = label.split("\n")[0].strip().strip('"').strip("'")
+        if cleaned.lower().startswith("label:"):
+            cleaned = cleaned[6:].strip()
+        return cleaned[:80] if cleaned else _keyword_fallback(keywords)
 
-    # Keyword heuristic fallback
+    return _keyword_fallback(keywords)
+
+
+def _keyword_fallback(keywords: list[str]) -> str:
     bigrams = [k for k in keywords if " " in k]
     unigrams = [k for k in keywords if " " not in k and len(k) > 3]
     parts: list[str] = []

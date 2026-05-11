@@ -89,7 +89,7 @@ export default function MentionsPage() {
   }, [load]);
 
   useMentionStream(
-    (m) => setLiveCount((c) => c + 1),
+    () => setLiveCount((c) => c + 1),
     trackerId || undefined
   );
 

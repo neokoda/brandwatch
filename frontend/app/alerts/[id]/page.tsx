@@ -140,7 +140,7 @@ export default function AlertDetailPage() {
             ) : (
               <div className="text-center py-8 space-y-3">
                 <p className="text-sm text-muted-foreground">No draft yet</p>
-                <p className="text-xs text-muted-foreground">Click "Draft response" to generate an AI-assisted response via your configured agent webhook.</p>
+                <p className="text-xs text-muted-foreground">Click &quot;Draft response&quot; to generate an AI-assisted response via your configured agent webhook.</p>
                 <Button size="sm" onClick={handleDraft} disabled={drafting}>
                   {drafting ? <Spinner /> : <><Zap size={13} /> Generate draft</>}
                 </Button>
