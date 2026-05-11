@@ -81,11 +81,26 @@ export default function DashboardPage() {
 
   async function handleGenerateInsight() {
     setGenerating(true);
-    await insightsApi.generate().catch(console.error);
-    setTimeout(() => {
-      insightsApi.list().then((i) => setInsights(i.slice(0, 3)));
+    const before = Date.now();
+    try {
+      await insightsApi.generate();
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const updated = await insightsApi.list();
+        const hasNew = updated.some(
+          (i) => new Date(i.generated_at).getTime() > before
+        );
+        if (hasNew) {
+          setInsights(updated.slice(0, 3));
+          break;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
       setGenerating(false);
-    }, 3000);
+    }
   }
 
   const VelocityIcon = velocity?.trend === "up" ? TrendingUp : velocity?.trend === "down" ? TrendingDown : Minus;

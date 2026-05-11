@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,11 +32,11 @@ async def list_insights(
 async def generate_insight(
     background_tasks: BackgroundTasks,
     current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    account_id = current_user.account_id
-    background_tasks.add_task(_run_insight, account_id)
-    return {"status": "queued"}
+    """Queue insight generation. Frontend should poll GET /insights until a new entry appears."""
+    queued_at = datetime.now(timezone.utc).isoformat()
+    background_tasks.add_task(_run_insight, current_user.account_id)
+    return {"status": "queued", "queued_at": queued_at}
 
 
 async def _run_insight(account_id: uuid.UUID):

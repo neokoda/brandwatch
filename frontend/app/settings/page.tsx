@@ -8,13 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Separator } from "@/components/ui/separator";
-import { trackersApi, accountApi, ingestApi } from "@/lib/api";
+import { trackersApi, ingestApi } from "@/lib/api";
 import { useAuth } from "@/components/providers/auth-provider";
-import type { Tracker, Account, IngestionRun } from "@/lib/types";
-import { Plus, Trash2, RefreshCw, Save } from "lucide-react";
+import type { Tracker, IngestionRun } from "@/lib/types";
+import { Plus, Trash2, RefreshCw } from "lucide-react";
 
-const TABS = ["Trackers", "Agent", "Ingestion"] as const;
+const TABS = ["Trackers", "Ingestion"] as const;
 type Tab = typeof TABS[number];
 
 export default function SettingsPage() {
@@ -44,7 +43,6 @@ export default function SettingsPage() {
 
       <div className="mt-6">
         {tab === "Trackers" && <TrackersTab />}
-        {tab === "Agent" && <AgentTab />}
         {tab === "Ingestion" && <IngestionTab />}
       </div>
     </AppShell>
@@ -261,89 +259,6 @@ function TrackersTab() {
               </div>
             </div>
           ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AgentTab() {
-  const [account, setAccount] = useState<Account | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [apiToken, setApiToken] = useState("");
-  const [telegramChatId, setTelegramChatId] = useState("");
-
-  useEffect(() => {
-    accountApi.get().then((a) => {
-      setAccount(a);
-      setWebhookUrl(a.agent_webhook_url ?? "");
-      setTelegramChatId(a.telegram_chat_id ?? "");
-    }).finally(() => setLoading(false));
-  }, []);
-
-  async function handleSave() {
-    setSaving(true);
-    const updated = await accountApi.update({
-      agent_webhook_url: webhookUrl || undefined,
-      agent_api_token: apiToken || undefined,
-      telegram_chat_id: telegramChatId || undefined,
-    });
-    setAccount(updated);
-    setApiToken("");
-    setSaving(false);
-  }
-
-  if (loading) return <Spinner />;
-
-  return (
-    <div className="max-w-lg space-y-6">
-      <div>
-        <p className="text-sm font-medium mb-1">BYOA — Bring Your Own Agent</p>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          Configure your own OpenAI-compatible agent endpoint. When alerts fire, the platform POSTs a structured payload to this webhook. You can use Hermes, OpenClaw, or any compatible agent.
-        </p>
-      </div>
-
-      <Separator />
-
-      <div className="space-y-4">
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Agent webhook URL</label>
-          <Input
-            value={webhookUrl}
-            onChange={(e) => setWebhookUrl(e.target.value)}
-            placeholder="https://your-agent.com/v1/chat/completions"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground uppercase tracking-wide font-medium">API token (leave blank to keep current)</label>
-          <Input
-            type="password"
-            value={apiToken}
-            onChange={(e) => setApiToken(e.target.value)}
-            placeholder="sk-..."
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Telegram chat ID (for notifications)</label>
-          <Input
-            value={telegramChatId}
-            onChange={(e) => setTelegramChatId(e.target.value)}
-            placeholder="-100123456789"
-          />
-        </div>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? <Spinner /> : <Save size={13} />}
-          Save agent config
-        </Button>
-      </div>
-
-      {account?.agent_webhook_url && (
-        <div className="border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium mb-2">Current endpoint</p>
-          <p className="text-sm font-mono break-all">{account.agent_webhook_url}</p>
         </div>
       )}
     </div>

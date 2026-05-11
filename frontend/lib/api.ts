@@ -7,7 +7,7 @@ import type {
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 45_000): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -16,7 +16,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${BASE}${path}`, { ...options, headers, signal: controller.signal });
@@ -79,7 +79,7 @@ export const mentionsApi = {
   triage: (id: string, data: { triage_status?: string; triage_priority?: string; triage_assignee?: string; triage_note?: string }) =>
     request<Mention>(`/mentions/${id}/triage`, { method: "PATCH", body: JSON.stringify(data) }),
   draftReply: (id: string) =>
-    request<{ draft_reply: string | null }>(`/mentions/${id}/draft-reply`, { method: "POST" }),
+    request<{ draft_reply: string | null }>(`/mentions/${id}/draft-reply`, { method: "POST" }, 120_000),
 };
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ export const alertsApi = {
   resolve: (id: string) =>
     request<Alert>(`/alerts/${id}/resolve`, { method: "PATCH" }),
   draftResponse: (id: string) =>
-    request<{ draft_response: string | null }>(`/alerts/${id}/draft-response`, { method: "POST" }),
+    request<{ draft_response: string | null }>(`/alerts/${id}/draft-response`, { method: "POST" }, 120_000),
 };
 
 // ── Topics ────────────────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ export const topicsApi = {
 
 export const insightsApi = {
   list: () => request<CrossChannelInsight[]>("/insights"),
-  generate: () => request<{ status: string }>("/insights/generate", { method: "POST" }),
+  generate: () => request<{ status: string }>("/insights/generate", { method: "POST" }, 120_000),
 };
 
 // ── Saved Filters ─────────────────────────────────────────────────────────────

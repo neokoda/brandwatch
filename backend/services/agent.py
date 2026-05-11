@@ -61,7 +61,7 @@ async def draft_mention_reply(db: AsyncSession, mention: Mention, account_id: uu
         },
     ]
 
-    draft = await gemma_chat(messages, max_tokens=200, temperature=0.7)
+    draft = await gemma_chat(messages, max_tokens=1024, temperature=0.7)
 
     if account and account.agent_webhook_url:
         await _forward_to_webhook(account, messages, draft)
@@ -131,7 +131,7 @@ async def notify_agent(db: AsyncSession, alert: Alert) -> str | None:
         },
     ]
 
-    draft = await gemma_chat(messages, max_tokens=300, temperature=0.4)
+    draft = await gemma_chat(messages, max_tokens=1024, temperature=0.4)
 
     if account and account.agent_webhook_url:
         await _forward_to_webhook(account, messages, draft)

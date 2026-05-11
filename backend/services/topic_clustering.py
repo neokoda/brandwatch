@@ -232,7 +232,7 @@ async def _label_cluster(
                 ),
             },
         ],
-        max_tokens=25,
+        max_tokens=1024,  # thinking tokens count against budget; label itself is short
         temperature=0.2,
     )
     if label:

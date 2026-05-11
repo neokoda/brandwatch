@@ -7,28 +7,53 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Spinner } from "@/components/ui/spinner";
-import { insightsApi } from "@/lib/api";
+import { insightsApi, trackersApi } from "@/lib/api";
 import { useAuth } from "@/components/providers/auth-provider";
-import type { CrossChannelInsight } from "@/lib/types";
+import type { CrossChannelInsight, Tracker } from "@/lib/types";
 import { RefreshCw, Lightbulb } from "lucide-react";
+import Link from "next/link";
 
 export default function InsightsPage() {
   const { user } = useAuth();
   const [insights, setInsights] = useState<CrossChannelInsight[]>([]);
+  const [trackerMap, setTrackerMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
-    insightsApi.list().then(setInsights).finally(() => setLoading(false));
+    Promise.all([insightsApi.list(), trackersApi.list()])
+      .then(([i, ts]) => {
+        setInsights(i);
+        const map: Record<string, string> = {};
+        ts.forEach((t: Tracker) => { map[t.id] = t.name; });
+        setTrackerMap(map);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   async function handleGenerate() {
     setGenerating(true);
-    await insightsApi.generate().catch(console.error);
-    setTimeout(() => {
-      insightsApi.list().then(setInsights);
+    const before = Date.now();
+    try {
+      await insightsApi.generate(); // returns immediately (202 queued)
+      // Poll until a new insight appears (generated after we queued) or 2-min timeout
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const updated = await insightsApi.list();
+        const hasNew = updated.some(
+          (i) => new Date(i.generated_at).getTime() > before
+        );
+        if (hasNew) {
+          setInsights(updated);
+          break;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
       setGenerating(false);
-    }, 4000);
+    }
   }
 
   return (
@@ -37,10 +62,13 @@ export default function InsightsPage() {
         title="Agent Insights"
         description="Cross-channel intelligence generated every 2 hours"
         action={
-          <Button size="sm" onClick={handleGenerate} disabled={generating}>
-            {generating ? <Spinner /> : <Lightbulb size={13} />}
-            Generate now
-          </Button>
+          <div className="flex items-center gap-3">
+            {generating && <span className="text-xs text-muted-foreground animate-pulse">Generating insight…</span>}
+            <Button size="sm" onClick={handleGenerate} disabled={generating}>
+              {generating ? <Spinner /> : <Lightbulb size={13} />}
+              Generate now
+            </Button>
+          </div>
         }
       />
 
@@ -70,7 +98,11 @@ export default function InsightsPage() {
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {insight.related_tracker_ids.map((tid) => (
-                    <Badge key={tid} variant="muted">tracker: {tid.slice(0, 8)}…</Badge>
+                    <Link key={tid} href={`/mentions?tracker_id=${tid}`}>
+                      <Badge variant="muted" className="cursor-pointer hover:bg-surface transition-colors">
+                        {trackerMap[tid] ?? tid.slice(0, 8) + "…"}
+                      </Badge>
+                    </Link>
                   ))}
                   <span className="text-xs text-muted-foreground ml-auto">
                     {new Date(insight.generated_at).toLocaleString()}

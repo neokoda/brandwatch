@@ -118,7 +118,7 @@ async def _gemma_insight(
                 ),
             },
         ],
-        max_tokens=200,
+        max_tokens=1024,  # thinking tokens count against budget
         temperature=0.3,
     )
 

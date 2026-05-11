@@ -51,9 +51,9 @@ export default function MentionDetailPage() {
     setDraftLoading(true);
     try {
       const res = await mentionsApi.draftReply(id);
-      setDraftReply(res.draft_reply ?? "No response from agent. Configure an agent webhook in Settings → Agent.");
+      setDraftReply(res.draft_reply ?? "No draft generated — the AI model did not return a response. Try again.");
     } catch {
-      setDraftReply("Failed to generate draft. Ensure the agent webhook is configured in Settings → Agent.");
+      setDraftReply("Failed to generate draft. Please try again.");
     } finally {
       setDraftLoading(false);
     }
