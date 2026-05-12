@@ -24,22 +24,27 @@ EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"   # feature-extraction; all-MiniLM-L6
 async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     """Recluster mentions for a tracker. Returns number of clusters created."""
     from backend.models.tracker import Tracker
+
+    # --- Phase 1: Read all data then release DB connection ---
+    # Neon closes idle connections in ~30s. HuggingFace + Gemini calls take 60-120s,
+    # so we close the session before AI work and reopen for writes.
     tracker_result = await db.execute(select(Tracker).where(Tracker.id == tracker_id))
     tracker = tracker_result.scalar_one_or_none()
     tracker_name = tracker.name if tracker else "Unknown"
     tracker_keywords = tracker.keywords[:5] if tracker and tracker.keywords else []
 
     result = await db.execute(
-        select(Mention.id, Mention.content_text, Mention.sentiment_score)
+        select(Mention.id, Mention.content_text, Mention.sentiment_score, Mention.sentiment_label)
         .where(Mention.tracker_id == tracker_id, Mention.language_code == "en")
         .order_by(Mention.ingested_at.desc())
         .limit(2000)
     )
     rows = result.all()
+    await db.close()  # release connection before long AI calls
 
     # Filter out very short or mostly non-ASCII texts
     clean_rows = [
-        (r[0], r[1], r[2]) for r in rows
+        (r[0], r[1], r[2], r[3]) for r in rows
         if len(r[1].strip()) >= 30
         and sum(1 for c in r[1] if ord(c) < 128) / max(len(r[1]), 1) >= 0.85
     ]
@@ -51,7 +56,9 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     ids = [r[0] for r in clean_rows]
     texts = [r[1][:512] for r in clean_rows]
     sentiment_scores = [r[2] if r[2] is not None else 0.5 for r in clean_rows]
+    sentiment_labels = [r[3] or "neutral" for r in clean_rows]
 
+    # --- Phase 2: AI processing (no DB connection held) ---
     embeddings = await _get_embeddings(texts)
     if embeddings is None:
         return 0
@@ -60,43 +67,61 @@ async def recluster_tracker(db: AsyncSession, tracker_id: uuid.UUID) -> int:
     if not clusters:
         return 0
 
-    # Remove old clusters for this tracker before writing new ones
-    await db.execute(
-        update(Mention)
-        .where(Mention.tracker_id == tracker_id)
-        .values(topic_cluster_id=None)
-    )
-    await db.execute(delete(TopicCluster).where(TopicCluster.tracker_id == tracker_id))
-
     now = datetime.now(timezone.utc)
-    created = 0
+    prepared: list[dict] = []
     for cluster_texts, cluster_indices, keywords in clusters:
         label = await _label_cluster(keywords, cluster_texts[:5], tracker_name, tracker_keywords)
         mention_ids = [ids[i] for i in cluster_indices]
         avg_sentiment = round(sum(sentiment_scores[i] for i in cluster_indices) / len(cluster_indices), 3)
+        label_counts: dict[str, int] = {}
+        for i in cluster_indices:
+            lbl = sentiment_labels[i]
+            label_counts[lbl] = label_counts.get(lbl, 0) + 1
+        dominant = max(label_counts, key=lambda k: label_counts[k])
+        prepared.append({
+            "label": label,
+            "keywords": keywords,
+            "mention_ids": mention_ids,
+            "avg_sentiment": avg_sentiment,
+            "dominant": dominant,
+        })
 
-        cluster = TopicCluster(
-            id=uuid.uuid4(),
-            tracker_id=tracker_id,
-            label=label,
-            label_raw=", ".join(keywords[:5]),
-            keywords=keywords[:10],
-            mention_count=len(mention_ids),
-            sentiment_avg=avg_sentiment,
-            period_start=now,
-            period_end=now,
-        )
-        db.add(cluster)
-        await db.flush()
-
-        await db.execute(
+    # --- Phase 3: Write results with a fresh DB connection ---
+    from backend.database import async_session_factory
+    async with async_session_factory() as write_db:
+        await write_db.execute(
             update(Mention)
-            .where(Mention.id.in_(mention_ids))
-            .values(topic_cluster_id=cluster.id)
+            .where(Mention.tracker_id == tracker_id)
+            .values(topic_cluster_id=None)
         )
-        created += 1
+        await write_db.execute(delete(TopicCluster).where(TopicCluster.tracker_id == tracker_id))
 
-    await db.commit()
+        created = 0
+        for p in prepared:
+            cluster = TopicCluster(
+                id=uuid.uuid4(),
+                tracker_id=tracker_id,
+                label=p["label"],
+                label_raw=", ".join(p["keywords"][:5]),
+                keywords=p["keywords"][:10],
+                mention_count=len(p["mention_ids"]),
+                sentiment_avg=p["avg_sentiment"],
+                dominant_sentiment=p["dominant"],
+                period_start=now,
+                period_end=now,
+            )
+            write_db.add(cluster)
+            await write_db.flush()
+            await write_db.execute(
+                update(Mention)
+                .where(Mention.id.in_(p["mention_ids"]))
+                .values(topic_cluster_id=cluster.id)
+            )
+            created += 1
+
+        await write_db.commit()
+
+    logger.info("recluster_tracker %s: created %d clusters", tracker_id, created)
     return created
 
 
@@ -211,6 +236,13 @@ async def _label_cluster(
     if tracker_keywords:
         brand_ctx += f" (monitored keywords: {', '.join(tracker_keywords)})"
 
+    def _clean(raw: str) -> str:
+        c = raw.split("\n")[0].strip().strip('"').strip("'").strip("*")
+        if c.lower().startswith("label:"):
+            c = c[6:].strip().strip("*").strip()
+        return c[:80]
+
+    # First attempt: full prompt with example mentions
     label = await gemma_chat(
         messages=[
             {
@@ -232,15 +264,32 @@ async def _label_cluster(
                 ),
             },
         ],
-        max_tokens=1024,  # thinking tokens count against budget; label itself is short
+        max_tokens=100,
         temperature=0.2,
     )
     if label:
-        # Strip any leading "Label:" or quotes Gemma might add
-        cleaned = label.split("\n")[0].strip().strip('"').strip("'")
-        if cleaned.lower().startswith("label:"):
-            cleaned = cleaned[6:].strip()
-        return cleaned[:80] if cleaned else _keyword_fallback(keywords)
+        cleaned = _clean(label)
+        if cleaned:
+            return cleaned
+
+    # Second attempt: keywords only (no examples — avoids safety-filter triggers on mention text)
+    label2 = await gemma_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"Reply with only a 3-5 word topic label, no punctuation.\n\n"
+                    f"Keywords: {keyword_str}\n\nLabel:"
+                ),
+            },
+        ],
+        max_tokens=50,
+        temperature=0.3,
+    )
+    if label2:
+        cleaned2 = _clean(label2)
+        if cleaned2:
+            return cleaned2
 
     return _keyword_fallback(keywords)
 

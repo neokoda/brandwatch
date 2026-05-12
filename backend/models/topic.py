@@ -24,6 +24,7 @@ class TopicCluster(Base):
     keywords: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     mention_count: Mapped[int] = mapped_column(Integer, default=0)
     sentiment_avg: Mapped[float] = mapped_column(Float, default=0.0)
+    dominant_sentiment: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

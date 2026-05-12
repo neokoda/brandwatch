@@ -299,7 +299,7 @@ export default function DashboardPage() {
                 </Button>
               </div>
               {insights.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                   {insights.map((i) => (
                     <div key={i.id} className="p-3 border border-border rounded text-sm">
                       <p className="text-foreground leading-relaxed">{i.insight_text}</p>

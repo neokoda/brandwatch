@@ -110,6 +110,7 @@ export interface TopicCluster {
   keywords: string[];
   mention_count: number;
   sentiment_avg: number;
+  dominant_sentiment?: string | null;
   period_start: string;
   period_end: string;
 }

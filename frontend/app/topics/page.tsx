@@ -15,9 +15,9 @@ import { useAuth } from "@/components/providers/auth-provider";
 import type { TopicCluster, Tracker } from "@/lib/types";
 import { RefreshCw } from "lucide-react";
 
-function sentimentLabelFromScore(score: number): "positive" | "negative" | "neutral" {
-  if (score > 0.6) return "positive";
-  if (score < 0.4) return "negative";
+function sentimentLabel(t: TopicCluster): "positive" | "negative" | "neutral" {
+  const d = t.dominant_sentiment;
+  if (d === "positive" || d === "negative" || d === "neutral") return d;
   return "neutral";
 }
 
@@ -92,7 +92,7 @@ export default function TopicsPage() {
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <p className="font-semibold text-sm leading-tight">{t.label}</p>
-                  <SentimentBadge label={sentimentLabelFromScore(t.sentiment_avg)} />
+                  <SentimentBadge label={sentimentLabel(t)} />
                 </div>
                 <div className="flex flex-wrap gap-1 mb-3">
                   {t.keywords.slice(0, 6).map((k) => (

@@ -49,7 +49,7 @@ export default function SettingsPage() {
   );
 }
 
-const ALL_SOURCES = ["gdelt", "youtube", "reddit", "rss", "hackernews", "bluesky", "mastodon", "playstore", "appstore"] as const;
+const ALL_SOURCES = ["gdelt", "youtube", "reddit", "rss", "hackernews", "playstore", "appstore"] as const;
 type SourceKey = typeof ALL_SOURCES[number];
 
 const SOURCE_LABELS: Record<SourceKey, string> = {
@@ -58,8 +58,6 @@ const SOURCE_LABELS: Record<SourceKey, string> = {
   reddit: "Reddit",
   rss: "RSS",
   hackernews: "Hacker News",
-  bluesky: "Bluesky",
-  mastodon: "Mastodon",
   playstore: "Play Store",
   appstore: "App Store",
 };
@@ -234,9 +232,7 @@ function TrackersTab() {
                   )}
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {t.keywords.slice(0, 5).map((k) => (
-                    <span key={k} className="text-xs text-muted-foreground">{k}</span>
-                  ))}
+                  <span className="text-xs text-muted-foreground">{t.keywords.slice(0, 5).join(", ")}</span>
                   {t.keywords.length > 5 && <span className="text-xs text-muted-foreground">+{t.keywords.length - 5}</span>}
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1.5">
